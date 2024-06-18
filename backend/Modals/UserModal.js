@@ -15,25 +15,27 @@ const UserScheme = new mongoose.Schema({
     type: String,
     min: 3,
     max: 255,
+    unique: true, // Ensure email uniqueness
   },
   password: {
     type: String,
     max: 1024,
     min: 8,
   },
-  // profilePicture: {
-  //   type: String,
-  // },
-
-  // Other related fields set by the invitation link
   role: {
     type: String,
   },
   team: {
     type: String,
   },
-  project: {
+  projects: {
     type: String,
+  },
+  resetPasswordToken: {
+    type: String,
+  },
+  resetPasswordExpires: {
+    type: Date,
   },
 });
 

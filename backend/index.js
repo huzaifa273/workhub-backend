@@ -3,6 +3,7 @@ const app = express();
 const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const userRoute = require("./Router/UserRouter");
+const userDataRoute = require("./Router/UserDataRouter");
 // const postRoute = require("./Router/post");
 const cors = require("cors");
 dotenv.config();
@@ -12,18 +13,14 @@ mongoose
     console.log("Database connected");
   })
   .catch(() => {
-    console.log("Connection to Database failed");
+    console.log("Connection to Database Failed");
   });
 
 app.use(cors());
 app.use(express.json());
 app.use("/api/user", userRoute);
+app.use("/api/put", userDataRoute);
 // app.use("/api/post", postRoute);
-
-// Example route
-// app.get("/", (req, res) => {
-//   res.send("Hello from Express!");
-// });
 
 app.listen(5000, () => {
   console.log("Server is running on http://localhost:" + 5000);
