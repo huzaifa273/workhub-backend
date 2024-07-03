@@ -8,6 +8,12 @@ const UserDataScheme = new mongoose.Schema(
     screenshot: {
       type: String,
     },
+    date: {
+      type: String,
+    },
+    time: {
+      type: String,
+    },
   },
   {
     timestamps: true,

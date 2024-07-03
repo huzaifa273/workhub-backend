@@ -7,6 +7,8 @@ router.post("/upload", async (req, res) => {
   const newData = new UserData({
     user: req.body.user,
     screenshot: req.body.screenshot,
+    date: req.body.date,
+    time: req.body.time,
   });
   data = await newData.save();
   res.status(200).json({

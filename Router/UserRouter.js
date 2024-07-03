@@ -8,8 +8,12 @@ const dotenv = require("dotenv");
 const sendMail = require("./mailer");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const rateLimit = require("express-rate-limit");
 dotenv.config();
 
+const generateToken = () => {
+  return crypto.randomBytes(20).toString("hex");
+};
 ///////////////////////// register the owner //////////////////////////
 ///////////////////////////////////////////////////////////////////////
 
@@ -55,86 +59,136 @@ router.post("/register/owner", async (req, res) => {
 ///////////////////////////////////////////////////////////////////////
 
 router.post("/invite", async (req, res) => {
-  const newUser = new User({
-    firstName: "",
-    lastName: "",
-    email: req.body.email,
-    password: "",
-    role: req.body.role,
-    team: req.body.team,
-    projects: req.body.projects,
-  });
-  let user = await newUser.save();
+  // try {
+  // Generate reset token and expiration time
+  const registrationToken = generateToken();
+  const registrationTokenExpiry = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
 
-  const invitationLink = `http://localhost:3000/signup/`;
-
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+  // Transporter configuration
+  // in .env file Replace host with "smtp.gmail.com" and user with "malikhuzaifaawais1@gmail.com" email provider and password with "hojaccphamr*****" from the google account (search for "app passwords")
+  /* 
+    host: process.env.HOST,
     port: 465,
     secure: true, // Use `true` for port 465, `false` for all other ports
     auth: {
-      user: "malikhuzaifaawais1@gmail.com",
-      pass: process.env.PASS,
+      user: process.env.USER,
+      pass: process.env.PASSWORD,
+    },
+  */
+  const transporter = nodemailer.createTransport({
+    host: "sandbox.smtp.mailtrap.io",
+    port: 2525,
+    auth: {
+      user: process.env.USER,
+      pass: process.env.PASSWORD,
     },
   });
 
-  // async..await is not allowed in global scope, must use a wrapper
-  async function main() {
-    // send mail with defined transport object
-    const info = await transporter.sendMail({
-      from: `"WorkHub" <${process.env.USER}>`, // sender address
-      to: req.body.email, // list of receivers
-      subject: "WorkHub", // Subject line
-      text: "process.env", // plain text body
-      html: `<b>You are invited to join workhub as a ${req.body.role}. Here is the invitation link to join </b> ${invitationLink}`, // html body
-    });
+  const invitationLink = `http://localhost:3000/signup/${registrationToken}`;
 
-    console.log("Message sent: %s", info.messageId);
-    // Message sent: <d786aa62-4e0a-070a-47ed-0b0666549519@ethereal.email>
-    res.status(200).json({
-      message: "Email Invition Sent",
-      user: {
-        email: user.email,
-      },
+  // send mail with defined transport object
+  const info = await transporter.sendMail({
+    from: `"WorkHub" <${process.env.USER}>`, // sender address
+    to: req.body.email, // list of receivers
+    subject: "WorkHub Invitation", // Subject line
+    text: `You are invited to join WorkHub as a ${req.body.role}. Here is the invitation link to join: ${invitationLink}`, // plain text body
+    html: `<b>You are invited to join WorkHub as a ${req.body.role}. Here is the invitation link to join:</b> <a href="${invitationLink}">Register</a> This link will expire in 8 hours`, // html body
+  });
+
+  console.log("Message sent: %s", info.messageId);
+
+  // Check if the user already exists
+  let user = await User.findOne({ email: req.body.email });
+  if (user) {
+    // Update existing user with new token and expiry
+    user.registrationToken = registrationToken;
+    user.registrationTokenExpiry = registrationTokenExpiry;
+  } else {
+    // Create new user with empty fields except email
+    user = new User({
+      firstName: "",
+      lastName: "",
+      email: req.body.email,
+      password: "",
+      role: req.body.role,
+      team: req.body.team,
+      projects: req.body.projects,
+      registrationToken,
+      registrationTokenExpiry,
     });
   }
 
-  main().catch(console.error);
+  // Save the user
+  await user.save();
+
+  res.status(200).json({
+    message: "Invitation Sent Successfully",
+    user: {
+      email: user.email,
+    },
+  });
+  // } catch (error) {
+  //   console.error(error);
+  //   res
+  //     .status(500)
+  //     .json({ message: "Internal Server Error", error: error.message });
+  // }
 });
 
 ///////////////// register the invited member ///////////////
 /////////////////////////////////////////////////////////////
-
-router.post("/register", async (req, res) => {
+router.post("/register/:token", async (req, res) => {
   try {
-    let user = await User.findOne({ email: req.body.email });
+    const { token } = req.params;
+    const { email, firstName, lastName, password } = req.body;
+
+    // Find the user by email
+    const user = await User.findOne({ email });
+
     if (!user) {
-      return res.status(400).json("Need An invitation to register");
-    } else {
-      // Hash the password
-      const secPassword = await bcrypt.hash(req.body.password, saltRounds);
-
-      // Update the user details
-      user.firstName = req.body.firstName;
-      user.lastName = req.body.lastName;
-      user.password = secPassword;
-
-      // Save the updated user
-      await user.save();
-
-      // Send the response
-      res.status(200).json({ message: "Registered Successfully" });
+      return res.status(403).json({ message: "Email is not registered" });
     }
+
+    // Check if the token is valid
+    if (
+      user.registrationToken !== token ||
+      user.registrationTokenExpiry <= Date.now()
+    ) {
+      return res.status(403).json({ message: "Invalid or expired token" });
+    }
+
+    // Hash the password
+    const secPassword = await bcrypt.hash(password, saltRounds);
+
+    // Update the user details
+    user.firstName = firstName;
+    user.lastName = lastName;
+    user.password = secPassword;
+    user.registrationToken = undefined; // Clear the token
+    user.registrationTokenExpiry = undefined; // Clear the token expiry
+
+    // Save the updated user
+    await user.save();
+
+    // Send the response
+    res.status(200).json({ message: "Registered Successfully" });
   } catch (error) {
     console.error(error);
-    res.status(500).json("Server Error");
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
 
 ///////////////////////// login //////////////////////////
 //////////////////////////////////////////////////////////
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 login requests per `window` (here, per 15 minutes)
+  message: {
+    message: "Too many login attempts, please try again later after sometime.",
+  },
+});
 
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -179,73 +233,74 @@ router.post("/login", async (req, res) => {
 ///////////////////////// Forgot Passwword //////////////////////////
 ///////////////////////////////////////////////////////////////////////
 router.post("/forgot-password", async (req, res) => {
-  // try {
-  const { email } = req.body;
-  const user = await User.findOne({ email });
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
 
-  if (!user) {
-    return res.status(400).json({ message: "User not found" });
-  }
+    if (!user) {
+      return res.status(403).json({ message: "Email is not Registered" });
+    }
 
-  // Generate random token
-  const generateToken = () => {
-    return crypto.randomBytes(20).toString("hex");
-  };
+    // Generate random token
+    // Generate reset token and expiration time
+    const resetToken = generateToken();
+    const resetTokenExpiry = Date.now() + 3600000 * 8; // 1 hour
 
-  // Generate reset token and expiration time
-  const resetToken = generateToken();
-  const resetTokenExpiry = Date.now() + 3600000 * 8; // 1 hour
-
-  // Update user with reset token and expiry
-  user.resetPasswordToken = resetToken;
-  user.resetPasswordExpires = resetTokenExpiry;
-  await user.save();
-
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
+    // Update user with reset token and expiry
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires = resetTokenExpiry;
+    await user.save();
+    /* 
+    host: process.env.HOST,
     port: 465,
     secure: true, // Use `true` for port 465, `false` for all other ports
     auth: {
-      user: "malikhuzaifaawais1@gmail.com",
-      pass: process.env.PASS,
+      user: process.env.USER,
+      pass: process.env.PASSWORD,
     },
-  });
-
-  // Send email with reset link
-  const resetLink = `http://localhost:3000/reset-password/${resetToken}`;
-
-  // async..await is not allowed in global scope, must use a wrapper
-  async function main() {
-    // send mail with defined transport object
-    const info = await transporter.sendMail({
-      from: `"WorkHub" <${process.env.USER}>`, // sender address
-      to: req.body.email, // list of receivers
-      subject: "WorkHub Password Reset Request", // Subject line
-      text: `Click the link to reset your password: ${resetLink}`, // plain text body
-      html: `<p>You requested a password reset. Click the link to reset your password: <a href="${resetLink}">Reset Password</a> Link will expire in 8 hour </p>`, // html body
-    });
-
-    console.log("Message sent: %s", info.messageId);
-    // Message sent: <d786aa62-4e0a-070a-47ed-0b0666549519@ethereal.email>
-    res.status(200).json({
-      message: "Check your email",
-      user: {
-        email: user.email,
+  */
+    const transporter = nodemailer.createTransport({
+      host: "sandbox.smtp.mailtrap.io",
+      port: 2525,
+      auth: {
+        user: process.env.USER,
+        pass: process.env.PASSWORD,
       },
     });
+
+    // Send email with reset link
+    const resetLink = `http://localhost:3000/reset-password/${resetToken}`;
+    // async..await is not allowed in global scope, must use a wrapper
+    async function main() {
+      // send mail with defined transport object
+      const info = await transporter.sendMail({
+        // from: `"WorkHub" <${process.env.USER}>`, // sender address
+        from: `"WorkHub" <${process.env.USER}>`, // sender address
+        to: req.body.email, // list of receivers
+        subject: "WorkHub Password Reset Request", // Subject line
+        text: `Click the link to reset your password: ${resetLink}`, // plain text body
+        html: `<p>You requested a password reset. Click the link to reset your password: <a href="${resetLink}">Reset Password</a> Link will expire in 8 hour </p>`, // html body
+      });
+
+      console.log("Message sent: %s", info.messageId);
+      // Message sent: <d786aa62-4e0a-070a-47ed-0b0666549519@ethereal.email>
+      res.status(200).json({
+        message: "Check your email",
+        user: {
+          email: user.email,
+        },
+      });
+    }
+    main().catch((error) => {
+      res.status(500).json({ message: "Email not send", error });
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error });
   }
-
-  main().catch(console.error);
-
-  // res.status(200).json({ message: "Password reset link sent to your email" });
-  // } catch (error) {
-  //   res.status(500).json({ message: 'Server error', error });
-  // }
 });
 
 ////////////////////////// reset the password /////////////////////////
 ///////////////////////////////////////////////////////////////////////
-
 router.post("/reset-password/:token", async (req, res) => {
   // try {
   const { token } = req.params;
