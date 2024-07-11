@@ -106,13 +106,13 @@ router.post("/invite", async (req, res) => {
   } else {
     // Create new user with empty fields except email
     user = new User({
-      firstName: "",
-      lastName: "",
+      firstName: null,
+      lastName: null,
       email: req.body.email,
-      password: "",
+      password: null,
       role: req.body.role,
-      team: req.body.team,
-      projects: req.body.projects,
+      team: [req.body.team], // Modify this line to make team an array with the new team
+      projects: [req.body.projects],
       registrationToken,
       registrationTokenExpiry,
     });
@@ -148,7 +148,13 @@ router.post("/register/:token", async (req, res) => {
     if (!user) {
       return res.status(403).json({ message: "Email is not registered" });
     }
-
+    if (
+      user.registrationToken === null ||
+      user.registrationToken === undefined ||
+      user.registrationToken === ""
+    ) {
+      return res.status(400).json({ message: "You are already registered" });
+    }
     // Check if the token is valid
     if (
       user.registrationToken !== token ||
@@ -156,20 +162,16 @@ router.post("/register/:token", async (req, res) => {
     ) {
       return res.status(403).json({ message: "Invalid or expired token" });
     }
-
     // Hash the password
     const secPassword = await bcrypt.hash(password, saltRounds);
-
     // Update the user details
     user.firstName = firstName;
     user.lastName = lastName;
     user.password = secPassword;
     user.registrationToken = undefined; // Clear the token
     user.registrationTokenExpiry = undefined; // Clear the token expiry
-
     // Save the updated user
     await user.save();
-
     // Send the response
     res.status(200).json({ message: "Registered Successfully" });
   } catch (error) {
@@ -197,7 +199,15 @@ router.post("/login", loginLimiter, async (req, res) => {
     if (!user) {
       return res.status(400).json({ message: "Email is not registered" });
     }
-
+    if (
+      user.password === null ||
+      user.password === undefined ||
+      user.password === ""
+    ) {
+      return res.status(400).json({
+        message: "Please register first, Check your email for registration",
+      });
+    }
     // Compare the password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
@@ -240,7 +250,15 @@ router.post("/forgot-password", async (req, res) => {
     if (!user) {
       return res.status(403).json({ message: "Email is not Registered" });
     }
-
+    if (
+      user.password === null ||
+      user.password === undefined ||
+      user.password === ""
+    ) {
+      return res.status(400).json({
+        message: "Please register first, Check your email for registration",
+      });
+    }
     // Generate random token
     // Generate reset token and expiration time
     const resetToken = generateToken();

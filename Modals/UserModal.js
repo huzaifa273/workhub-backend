@@ -26,10 +26,10 @@ const UserScheme = new mongoose.Schema({
     type: String,
   },
   team: {
-    type: String,
+    type: [String],
   },
   projects: {
-    type: String,
+    type: [String],
   },
   resetPasswordToken: {
     type: String,
