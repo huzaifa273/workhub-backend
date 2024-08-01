@@ -6,6 +6,8 @@ const userRoute = require("./Router/UserRouter");
 const userDataRoute = require("./Router/UserDataRouter");
 const activityRoute = require("./Router/ActivityRouter");
 const getTimeSheetRoute = require("./Router/getTimeSheet");
+const projectRouter = require("./Router/projectRouter");
+const teamRouter = require("./Router/teamRouter");
 // const postRoute = require("./Router/post");
 const cors = require("cors");
 dotenv.config();
@@ -24,8 +26,12 @@ app.use("/api/user", userRoute);
 app.use("/api/put", userDataRoute);
 app.use("/api/put", activityRoute);
 app.use("/api/put", getTimeSheetRoute);
+app.use("/api/project", projectRouter);
+app.use("/api/team", teamRouter);
 // app.use("/api/post", postRoute);
 
-app.listen(5000, () => {
-  console.log("Server is running on http://localhost:" + 5000);
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log("Server is running on http://localhost:" + PORT);
 });

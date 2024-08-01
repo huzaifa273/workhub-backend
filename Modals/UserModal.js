@@ -1,5 +1,19 @@
 const mongoose = require("mongoose");
 
+const teamSchema = new mongoose.Schema({
+  teamId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Team",
+  },
+  teamRole: {
+    type: String,
+  },
+  isTeamLead: {
+    type: Boolean,
+    default: false,
+  },
+});
+
 const UserScheme = new mongoose.Schema({
   firstName: {
     type: String,
@@ -22,14 +36,38 @@ const UserScheme = new mongoose.Schema({
     max: 1024,
     min: 8,
   },
+  employeeStatus: {
+    type: String,
+  },
   role: {
     type: String,
   },
-  team: {
-    type: [String],
+  timeTrackingStatus: {
+    type: Boolean,
+  },
+  invitationStatus: {
+    type: String,
+  },
+  teams: {
+    type: [teamSchema],
   },
   projects: {
     type: [String],
+  },
+  lastTrackTime: {
+    type: Date,
+  },
+  timeZone: {
+    type: String,
+  },
+  allowedApps: {
+    type: String,
+  },
+  idleTimeOut: {
+    type: String,
+  },
+  keepIdleTime: {
+    type: String,
   },
   resetPasswordToken: {
     type: String,
@@ -42,6 +80,10 @@ const UserScheme = new mongoose.Schema({
   },
   registrationTokenExpiry: {
     type: Date,
+  },
+  dateAdded: {
+    type: Date,
+    default: Date.now(),
   },
 });
 
