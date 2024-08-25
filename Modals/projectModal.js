@@ -1,5 +1,19 @@
 const mongoose = require("mongoose");
 
+const projectUsers = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+  role: {
+    type: String,
+  },
+  addedViaTeam: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Team",
+  },
+});
+
 const projectSchema = new mongoose.Schema({
   projectName: {
     type: String,
@@ -7,12 +21,8 @@ const projectSchema = new mongoose.Schema({
     min: 1,
     max: 255,
   },
-  projectManager: {
-    type: [String],
-    required: true,
-  },
-  projectMembers: {
-    type: [String],
+  projectUsers: {
+    type: [projectUsers],
   },
   projectTeams: {
     type: [String],
@@ -22,9 +32,7 @@ const projectSchema = new mongoose.Schema({
   },
   projectStartDate: {
     type: String,
-  },
-  projectEndDate: {
-    type: String,
+    date: new Date(),
   },
 });
 

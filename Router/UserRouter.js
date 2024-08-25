@@ -19,7 +19,6 @@ const generateToken = () => {
 };
 ///////////////////////// register the owner //////////////////////////
 ///////////////////////////////////////////////////////////////////////
-
 router.post("/register/owner", async (req, res) => {
   // try and catch block will be used to catch the error
 
@@ -71,8 +70,12 @@ router.post("/invite", verifyToken, async (req, res) => {
       token: generateToken(),
     }));
 
+    // Create a session for atomic operations
+    const session = await User.startSession();
+    session.startTransaction();
+
     const userPromises = usersData.map(async ({ email, token }) => {
-      let user = await User.findOne({ email });
+      let user = await User.findOne({ email }).session(session);
       if (user) {
         // Update existing user with new token and expiry
         user.registrationToken = token;
@@ -85,18 +88,25 @@ router.post("/invite", verifyToken, async (req, res) => {
           email,
           password: null,
           role,
-          projects,
+          projects: {
+            projectId: projects,
+            projectRole: role,
+          },
           registrationToken: token,
           registrationTokenExpiry,
           invitationStatus: "pending",
           teams,
         });
       }
-      return user.save();
+      await user.save();
     });
 
     // Wait for all user operations to complete
     await Promise.all(userPromises);
+
+    // Commit the transaction
+    await session.commitTransaction();
+    session.endSession();
 
     // Send all emails in one batch
     const transporter = nodemailer.createTransport({
@@ -187,7 +197,10 @@ router.post("/invite-user-via-team", verifyToken, async (req, res) => {
         email,
         password: null,
         role,
-        projects,
+        projects: {
+          projectId: projects,
+          projectRole: role,
+        },
         registrationToken,
         registrationTokenExpiry,
         invitationStatus: "pending",
@@ -323,6 +336,12 @@ router.post("/register/:token", async (req, res) => {
 
     // Save the updated user
     await user.save();
+
+    // Update the projects collection with the new user
+    await projectModal.updateMany(
+      { _id: { $in: user.projects.map((project) => project.projectId) } },
+      { $addToSet: { projectUsers: { userId: user._id, role: user.role } } }
+    );
 
     // Add user to the teams if present
     if (user.teams && user.teams.length > 0) {
@@ -593,23 +612,21 @@ router.delete("/delete/:id", verifyToken, async (req, res) => {
     }
 
     // Remove the user from all teams where they are a member
-    await teamModal.updateMany({}, { $pull: { teamUsers: { userId: id } } });
+    await teamModal.updateMany(
+      { "teamUsers.userId": id },
+      { $pull: { teamUsers: { userId: id } } }
+    );
 
-    // Remove the user from all projects where they are a member or manager
+    // Remove the user from all projects where they are a member
     await projectModal.updateMany(
-      {},
-      {
-        $pull: {
-          projectMembers: id,
-          projectManager: id,
-        },
-      }
+      { "projectUsers.userId": id },
+      { $pull: { projectUsers: { userId: id } } }
     );
 
     // Delete the user
     await User.findByIdAndDelete(id);
 
-    res.status(200).json({ message: "Member deleted" });
+    res.status(200).json({ message: "Member and associated data deleted" });
   } catch (error) {
     console.error("Error deleting user and associated data:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -620,9 +637,53 @@ router.delete("/delete/:id", verifyToken, async (req, res) => {
 //////////////////////////////////////////////////////////////////////
 router.get("/user-id/:id", async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-    return res.status(200).json(user);
+    const user = await User.findById(req.params.id)
+      .populate({
+        path: "projects.projectId",
+        select: "projectName", // Select the fields you need from the Project schema
+      })
+      .populate({
+        path: "teams.teamId",
+        select: "teamName", // Select the fields you need from the Team schema
+      });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Transform the user's projects to include projectId and projectName
+    const userProjects = user.projects.map((project) => {
+      if (project.projectId) {
+        return {
+          projectId: project.projectId._id,
+          projectName: project.projectId.projectName,
+          projectRole: project.projectRole, // Include other fields from the user's project schema if needed
+        };
+      }
+    });
+
+    // Transform the user's teams to include teamId and teamName
+    const userTeams = user.teams.map((team) => {
+      if (team.teamId) {
+        return {
+          teamId: team.teamId._id,
+          teamName: team.teamId.teamName,
+          teamRole: team.teamRole,
+          isTeamLead: team.isTeamLead,
+        };
+      }
+    });
+
+    // Create a new user object to return
+    const userData = {
+      ...user._doc, // Spread the original user object
+      projects: userProjects, // Replace projects with the transformed version
+      teams: userTeams, // Replace teams with the transformed version
+    };
+
+    return res.status(200).json(userData);
   } catch (error) {
+    console.error(error);
     return res.status(500).json({ message: "Internal server error" });
   }
 });
@@ -630,10 +691,10 @@ router.get("/user-id/:id", async (req, res) => {
 ////////////////////////// Update the user Info //////////////////////////
 //////////////////////////////////////////////////////////////////////////
 router.put("/update-user/:id", verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const updatedMemberData = req.body;
+
   try {
-    const { id } = req.params;
-    const updatedMemberData = req.body;
-    console.log(updatedMemberData);
     // Find the user by ID
     const user = await User.findById(id);
 
@@ -643,10 +704,15 @@ router.put("/update-user/:id", verifyToken, async (req, res) => {
 
     // Update user details
     user.role = updatedMemberData.role;
-    user.projects = updatedMemberData.projects;
     user.allowedApps = updatedMemberData.allowedApps;
     user.idleTimeOut = updatedMemberData.idleTimeout;
     user.keepIdleTime = updatedMemberData.keepIdleTime;
+
+    // Transform project IDs into project objects
+    const updatedProjects = updatedMemberData.projects.map((projectId) => ({
+      projectId,
+    }));
+    user.projects = updatedProjects;
 
     // Update the user's teams
     const userTeamIds = updatedMemberData.teams.map((team) => team.teamId);
@@ -657,24 +723,49 @@ router.put("/update-user/:id", verifyToken, async (req, res) => {
       { $pull: { teamUsers: { userId: id } } }
     );
 
-    // Update or add the user in the specified teams
-    for (const teamData of updatedMemberData.teams) {
-      await teamModal.findByIdAndUpdate(teamData.teamId, {
-        $addToSet: {
-          teamUsers: {
-            userId: user._id.toString(),
-            teamRole: teamData.teamRole,
-            isTeamLead: teamData.isTeamLead,
+    // Add user to the specified teams and update their role and lead status
+    await Promise.all(
+      updatedMemberData.teams.map((teamData) =>
+        teamModal.findByIdAndUpdate(teamData.teamId, {
+          $addToSet: {
+            teamUsers: {
+              userId: id,
+              teamRole: teamData.teamRole,
+              isTeamLead: teamData.isTeamLead,
+            },
           },
-        },
-      });
-    }
+        })
+      )
+    );
 
     // Update the user's teams in their document
     user.teams = updatedMemberData.teams;
 
     // Save the updated user
     await user.save();
+
+    // Update projects to include the user
+    const projectIds = updatedMemberData.projects.map((project) => project);
+
+    // Remove user from projects they are no longer part of
+    await projectModal.updateMany(
+      { "projectUsers.userId": id, _id: { $nin: projectIds } },
+      { $pull: { projectUsers: { userId: id } } }
+    );
+
+    // Add user to the specified projects and update their role
+    await Promise.all(
+      projectIds.map((projectId) =>
+        projectModal.findByIdAndUpdate(projectId, {
+          $addToSet: {
+            projectUsers: {
+              userId: id,
+              role: updatedMemberData.role,
+            },
+          },
+        })
+      )
+    );
 
     res.status(200).json({ message: "User updated successfully" });
   } catch (error) {

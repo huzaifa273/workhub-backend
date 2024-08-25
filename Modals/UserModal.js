@@ -14,6 +14,14 @@ const teamSchema = new mongoose.Schema({
   },
 });
 
+const projectSchema = new mongoose.Schema({
+  projectId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Project",
+  },
+  projectRole: String, // Add other role-related information if needed
+});
+
 const UserScheme = new mongoose.Schema({
   firstName: {
     type: String,
@@ -52,7 +60,7 @@ const UserScheme = new mongoose.Schema({
     type: [teamSchema],
   },
   projects: {
-    type: [String],
+    type: [projectSchema],
   },
   lastTrackTime: {
     type: Date,
